@@ -51,11 +51,15 @@
 
   <div id="setup" class="setup" hidden>
     <h2>Первая настройка</h2>
-    <p>Вставьте адрес данных — его выдаёт таблица в меню
-       «Напоминания» → «Ссылки для уведомлений на рабочем столе», это ссылка под номером 2.
-       Адрес сохранится в этом браузере, вводить его каждый раз не придётся.</p>
-    <input id="endpoint" type="url" placeholder="https://script.google.com/macros/s/.../exec?key=...">
+    <p><b>Адрес веб-приложения.</b> Возьмите его в редакторе Apps Script:
+       «Начать развёртывание» → «Управление развёртываниями» → кнопка копирования под надписью
+       «Веб-приложение». Должен заканчиваться на <code>/exec</code>.</p>
+    <input id="endpoint" type="url" placeholder="https://script.google.com/macros/s/AKfy.../exec">
+    <p><b>Ключ доступа.</b> Он в таблице: меню «Напоминания» → «Ссылки для уведомлений
+       на рабочем столе», ячейка A4 на открывшемся листе.</p>
+    <input id="key" type="text" placeholder="например, 8f3c1a2b4d5e6f7a8b9c0d1e">
     <button class="primary" id="save">Сохранить и продолжить</button>
+    <div id="setupError" class="banner error" hidden style="margin-top:14px"></div>
   </div>
 
   <div id="app" hidden>
@@ -101,17 +105,41 @@
   function showSetup() {
     $('setup').hidden = false;
     $('app').hidden = true;
-    $('endpoint').value = endpoint();
+    var saved = endpoint();
+    if (saved) {
+      $('endpoint').value = saved.split('?')[0];
+      var m = saved.match(/[?&]key=([^&]+)/);
+      if (m) $('key').value = decodeURIComponent(m[1]);
+    }
+  }
+
+  function setupError(text) {
+    var box = $('setupError');
+    box.hidden = !text;
+    box.textContent = text || '';
   }
 
   $('save').addEventListener('click', function () {
-    var value = $('endpoint').value.trim();
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+/.test(value)) {
-      alert('Ожидается ссылка вида https://script.google.com/macros/s/.../exec?key=…\n' +
-            'Возьмите её в таблице: меню «Напоминания» → «Ссылки для уведомлений на рабочем столе».');
+    // адрес чистится от лишнего: часто копируют вместе с параметрами или пробелами
+    var address = $('endpoint').value.trim().split('?')[0].split('#')[0];
+    var key = $('key').value.trim();
+
+    // второй вариант — адрес корпоративного домена: /a/macros/домен/s/…/exec
+    if (!/^https:\/\/script\.google\.com\/(macros|a\/macros\/[^/]+)\/s\/[^/]+\/exec$/.test(address)) {
+      setupError(address.indexOf('/dev') !== -1
+        ? 'Это адрес для разработки (заканчивается на /dev) — он требует входа в аккаунт. ' +
+          'Нужен адрес развёртывания, заканчивающийся на /exec.'
+        : 'Адрес должен выглядеть так: https://script.google.com/macros/s/…/exec — ' +
+          'скопируйте его кнопкой копирования в разделе «Управление развёртываниями».');
       return;
     }
-    localStorage.setItem(KEY_ENDPOINT, value);
+    if (!key || /\s/.test(key)) {
+      setupError('Вставьте ключ доступа из ячейки A4 листа «Ссылки уведомлений».');
+      return;
+    }
+
+    setupError('');
+    localStorage.setItem(KEY_ENDPOINT, address + '?key=' + encodeURIComponent(key));
     start();
   });
 
@@ -160,9 +188,29 @@
       done = true;
       clearTimeout(timer);
       cleanup();
-      cb({ error: 'Не удалось загрузить данные. Развёртывание должно быть доступно «Всем».' });
+      cb({ error: diagnose(url), showCheck: true });
     };
     document.body.appendChild(script);
+  }
+
+  /**
+   * В ответ пришли не данные, а что-то другое — обычно страница входа Google.
+   * Разбираем самые частые причины по виду самой ссылки.
+   */
+  function diagnose(url) {
+    if (url.indexOf('/dev') !== -1) {
+      return 'В ссылке указан адрес для разработки (заканчивается на /dev) — он требует входа в аккаунт. ' +
+             'Нужен адрес развёртывания, заканчивающийся на /exec.';
+    }
+    if (url.indexOf('key=') === -1) {
+      return 'В ссылке нет ключа доступа. Скопируйте её заново целиком: в таблице меню ' +
+             '«Напоминания» → «Ссылки для уведомлений на рабочем столе», ссылка под номером 2.';
+    }
+    return 'Вместо данных пришла страница входа Google. Обычно это одно из двух: ' +
+           'у развёртывания доступ не «Все», либо развёрнута старая версия кода. ' +
+           'В редакторе Apps Script: «Начать развёртывание» → «Управление развёртываниями» → ' +
+           'карандаш → «У кого есть доступ: Все», «Версия: Новая версия» → «Развернуть». ' +
+           'Проверить ответ можно кнопкой ниже.';
   }
 
   /* ---------- отрисовка ---------- */
@@ -173,7 +221,7 @@
 
     fetchData(function (data) {
       if (!data || data.error) {
-        showBanner(data && data.error ? data.error : 'Неизвестная ошибка', true);
+        showBanner(data && data.error ? data.error : 'Неизвестная ошибка', true, data && data.showCheck);
         setStatus('Ошибка загрузки');
         return;
       }
@@ -302,11 +350,22 @@
 
   /* ---------- служебное ---------- */
 
-  function showBanner(text, isError) {
+  function showBanner(text, isError, withCheck) {
     var b = $('banner');
     b.hidden = false;
     b.textContent = text;
     b.className = 'banner' + (isError ? ' error' : ' blink');
+
+    if (withCheck) {
+      var btn = document.createElement('button');
+      btn.textContent = 'Открыть адрес данных и посмотреть ответ';
+      btn.style.marginTop = '10px';
+      btn.style.display = 'block';
+      btn.addEventListener('click', function () {
+        window.open(endpoint() + (endpoint().indexOf('?') === -1 ? '?' : '&') + 'format=json', '_blank', 'noopener');
+      });
+      b.appendChild(btn);
+    }
   }
 
   function setStatus(text) { $('status').textContent = text; }
