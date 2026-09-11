@@ -82,7 +82,7 @@
       Держите вкладку открытой (удобно закрепить её), страница сама проверяет обновления каждые 15 минут.
       Одно уведомление на строку в день. Нажмите «Включить уведомления» один раз — и всплывающие
       уведомления Windows будут приходить, даже когда окно браузера свёрнуто.
-      <br><br>Версия страницы: 3 (11.09.2026). Если здесь другой номер — браузер показывает
+      <br><br>Версия страницы: 4 (11.09.2026). Если здесь другой номер — браузер показывает
       сохранённую копию, обновите страницу сочетанием Ctrl+F5.
     </div>
   </div>
@@ -99,6 +99,7 @@
   var seq = 0;
   var lastRequested = null;
   var lastLoadAt = 0;
+  var failed = false;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -205,6 +206,13 @@
    * Разбираем самые частые причины по виду самой ссылки.
    */
   function diagnose(url) {
+    // Если данные хоть раз приходили, доступ и адрес заведомо в порядке:
+    // значит связь оборвалась — обычно вкладка спала или компьютер уходил в сон.
+    if (lastLoadAt) {
+      return 'Связь с таблицей прервалась — обычно это происходит, когда вкладка была свёрнута ' +
+             'или компьютер уходил в спящий режим. Данные ниже могли устареть. ' +
+             'Нажмите «Обновить» или просто подождите следующей проверки.';
+    }
     if (url.indexOf('/dev') !== -1) {
       return 'В ссылке указан адрес для разработки (заканчивается на /dev) — он требует входа в аккаунт. ' +
              'Нужен адрес развёртывания, заканчивающийся на /exec.';
@@ -236,23 +244,29 @@
     sel.appendChild(o);
   }
 
-  function load(isRetry) {
-    setStatus(isRetry ? 'Повторяю запрос…' : 'Проверяю…');
+  var RETRY_WAITS = [10000, 30000, 60000];
+
+  function load(attempt) {
+    attempt = attempt || 0;
+    setStatus(attempt ? 'Повторная попытка…' : 'Проверяю…');
     lastRequested = $('expert').value || '';
     localStorage.setItem(KEY_EXPERT, lastRequested);
 
     fetchData(function (data) {
       if (!data || data.error) {
-        // Одиночную заминку не показываем как ошибку: таблица могла пересчитывать данные.
-        if (!isRetry) {
-          setStatus('Таблица не ответила, повторю через 10 секунд…');
-          setTimeout(function () { load(true); }, 10000);
+        // Обрыв связи — обычное дело для фоновой вкладки, поэтому сначала молча пробуем ещё раз.
+        if (attempt < RETRY_WAITS.length) {
+          var wait = RETRY_WAITS[attempt];
+          setStatus('Нет ответа, повторю через ' + Math.round(wait / 1000) + ' с…');
+          setTimeout(function () { load(attempt + 1); }, wait);
           return;
         }
+        failed = true;
         showBanner(data && data.error ? data.error : 'Неизвестная ошибка', true, data && data.showCheck);
-        setStatus('Ошибка загрузки');
+        setStatus('Не удалось связаться с таблицей');
         return;
       }
+      failed = false;
       $('banner').hidden = true;
       lastLoadAt = Date.now();
       fillExperts(data.experts || []);
@@ -420,10 +434,14 @@
     setInterval(load, POLL_MS);
   }
 
-  // После сна компьютера таймер отстаёт: возвращаясь к вкладке, догоняем пропущенное.
+  // Вкладка вернулась на экран: догоняем пропущенное, а после обрыва пробуем сразу.
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && lastLoadAt && Date.now() - lastLoadAt > POLL_MS) load();
+    if (document.visibilityState !== 'visible') return;
+    if (failed || (lastLoadAt && Date.now() - lastLoadAt > POLL_MS)) load();
   });
+
+  // Сеть вернулась после сна или отключения — запрос, оборвавшийся тогда, повторяем сейчас.
+  window.addEventListener('online', function () { if (failed) load(); });
 
   $('refresh').addEventListener('click', load);
   $('expert').addEventListener('change', load);
