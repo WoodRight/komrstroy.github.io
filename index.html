@@ -82,6 +82,8 @@
       Держите вкладку открытой (удобно закрепить её), страница сама проверяет обновления каждые 15 минут.
       Одно уведомление на строку в день. Нажмите «Включить уведомления» один раз — и всплывающие
       уведомления Windows будут приходить, даже когда окно браузера свёрнуто.
+      <br><br>Версия страницы: 3 (11.09.2026). Если здесь другой номер — браузер показывает
+      сохранённую копию, обновите страницу сочетанием Ctrl+F5.
     </div>
   </div>
 
@@ -161,12 +163,15 @@
     var script = document.createElement('script');
     var done = false;
 
+    // Пересчёт по двум таблицам занимает секунды, поэтому ждём с запасом:
+    // при коротком ожидании страница ошибочно сообщала о потере связи.
     var timer = setTimeout(function () {
       if (done) return;
       done = true;
       cleanup();
-      cb({ error: 'Нет ответа от таблицы. Проверьте адрес данных и доступ к развёртыванию.' });
-    }, 20000);
+      cb({ error: 'Таблица не ответила за минуту. Скорее всего она сейчас пересчитывает данные — ' +
+                  'следующая проверка через 15 минут, или нажмите «Обновить».' });
+    }, 60000);
 
     window[name] = function (data) {
       done = true;
@@ -231,24 +236,32 @@
     sel.appendChild(o);
   }
 
-  function load() {
-    setStatus('Проверяю…');
+  function load(isRetry) {
+    setStatus(isRetry ? 'Повторяю запрос…' : 'Проверяю…');
     lastRequested = $('expert').value || '';
     localStorage.setItem(KEY_EXPERT, lastRequested);
 
     fetchData(function (data) {
       if (!data || data.error) {
+        // Одиночную заминку не показываем как ошибку: таблица могла пересчитывать данные.
+        if (!isRetry) {
+          setStatus('Таблица не ответила, повторю через 10 секунд…');
+          setTimeout(function () { load(true); }, 10000);
+          return;
+        }
         showBanner(data && data.error ? data.error : 'Неизвестная ошибка', true, data && data.showCheck);
         setStatus('Ошибка загрузки');
         return;
       }
+      $('banner').hidden = true;
       lastLoadAt = Date.now();
       fillExperts(data.experts || []);
       render(data.items || []);
       notify(data.items || []);
       setStatus('Обновлено в ' + new Date().toLocaleTimeString('ru-RU') +
                 ' • строк: ' + (data.items || []).length +
-                (data.updated ? ' • данные таблицы от ' + data.updated : ''));
+                (data.updated ? ' • данные таблицы от ' + data.updated : '') +
+                (data.stale ? ' • показан предыдущий ответ, таблица занята' : ''));
     });
   }
 
