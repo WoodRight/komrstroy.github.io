@@ -95,6 +95,8 @@
   var POLL_MS = 15 * 60 * 1000;
   var CURRENT = [];
   var seq = 0;
+  var lastRequested = null;
+  var lastLoadAt = 0;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -215,9 +217,24 @@
 
   /* ---------- отрисовка ---------- */
 
+  /**
+   * До первого ответа сервера в списке стоит заглушка. Подставляем сохранённое имя
+   * заранее, иначе первый запрос уходит с текстом заглушки и возвращает пустоту.
+   */
+  function primeExpert() {
+    var sel = $('expert');
+    var saved = localStorage.getItem(KEY_EXPERT) || '';
+    sel.innerHTML = '';
+    var o = document.createElement('option');
+    o.value = saved;
+    o.textContent = saved || 'все эксперты';
+    sel.appendChild(o);
+  }
+
   function load() {
     setStatus('Проверяю…');
-    localStorage.setItem(KEY_EXPERT, $('expert').value || '');
+    lastRequested = $('expert').value || '';
+    localStorage.setItem(KEY_EXPERT, lastRequested);
 
     fetchData(function (data) {
       if (!data || data.error) {
@@ -225,6 +242,7 @@
         setStatus('Ошибка загрузки');
         return;
       }
+      lastLoadAt = Date.now();
       fillExperts(data.experts || []);
       render(data.items || []);
       notify(data.items || []);
@@ -245,8 +263,11 @@
       if (n === saved) o.selected = true;
       sel.appendChild(o);
     });
+    // если имя ещё не выбирали, берём первое в списке — не полагаясь на поведение браузера
+    if (!saved) sel.value = names[0];
     sel.dataset.filled = '1';
-    if (!saved) load();
+    // после заполнения списка выбранное имя могло смениться — тогда данные нужно перезапросить
+    if (sel.value !== lastRequested) load();
   }
 
   function render(items) {
@@ -381,9 +402,15 @@
     $('app').hidden = false;
     if (new Date().getDay() === 1) $('overdue').checked = true;
     updatePermissionButton();
+    primeExpert();
     load();
     setInterval(load, POLL_MS);
   }
+
+  // После сна компьютера таймер отстаёт: возвращаясь к вкладке, догоняем пропущенное.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && lastLoadAt && Date.now() - lastLoadAt > POLL_MS) load();
+  });
 
   $('refresh').addEventListener('click', load);
   $('expert').addEventListener('change', load);
