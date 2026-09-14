@@ -82,7 +82,7 @@
       Держите вкладку открытой (удобно закрепить её), страница сама проверяет обновления каждые 15 минут.
       Одно уведомление на строку в день. Нажмите «Включить уведомления» один раз — и всплывающие
       уведомления Windows будут приходить, даже когда окно браузера свёрнуто.
-      <br><br>Версия страницы: 4 (11.09.2026). Если здесь другой номер — браузер показывает
+      <br><br>Версия страницы: 5 (14.09.2026). Если здесь другой номер — браузер показывает
       сохранённую копию, обновите страницу сочетанием Ctrl+F5.
     </div>
   </div>
@@ -94,6 +94,7 @@
   var KEY_ENDPOINT = 'cd_endpoint';
   var KEY_EXPERT = 'cd_expert';
   var KEY_SHOWN = 'cd_shown';
+  var KEY_OVERDUE = 'cd_overdue';
   var POLL_MS = 15 * 60 * 1000;
   var CURRENT = [];
   var seq = 0;
@@ -427,7 +428,8 @@
   function start() {
     $('setup').hidden = true;
     $('app').hidden = false;
-    if (new Date().getDay() === 1) $('overdue').checked = true;
+    // Галочку переключает только сам эксперт; страница лишь помнит его выбор.
+    $('overdue').checked = localStorage.getItem(KEY_OVERDUE) === '1';
     updatePermissionButton();
     primeExpert();
     load();
@@ -445,7 +447,10 @@
 
   $('refresh').addEventListener('click', load);
   $('expert').addEventListener('change', load);
-  $('overdue').addEventListener('change', load);
+  $('overdue').addEventListener('change', function () {
+    localStorage.setItem(KEY_OVERDUE, $('overdue').checked ? '1' : '0');
+    load();
+  });
 
   if (endpoint()) start(); else showSetup();
 })();
