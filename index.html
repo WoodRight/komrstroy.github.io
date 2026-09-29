@@ -82,7 +82,7 @@
       Держите вкладку открытой (удобно закрепить её), страница сама проверяет обновления каждые 15 минут.
       Одно уведомление на строку в день. Нажмите «Включить уведомления» один раз — и всплывающие
       уведомления Windows будут приходить, даже когда окно браузера свёрнуто.
-      <br><br>Версия страницы: 5 (14.09.2026). Если здесь другой номер — браузер показывает
+      <br><br>Версия страницы: 7 (29.09.2026). Если здесь другой номер — браузер показывает
       сохранённую копию, обновите страницу сочетанием Ctrl+F5.
     </div>
   </div>
@@ -101,6 +101,7 @@
   var lastRequested = null;
   var lastLoadAt = 0;
   var failed = false;
+  var failStreak = 0;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -207,6 +208,15 @@
    * Разбираем самые частые причины по виду самой ссылки.
    */
   function diagnose(url) {
+    // Несколько неудачных циклов подряд — это уже не случайный обрыв.
+    // Чаще всего адрес развёртывания сменился: в Apps Script создали новое вместо обновления старого.
+    if (failStreak >= 2) {
+      return 'Таблица не отвечает уже несколько раз подряд. Обычно это значит, что адрес ' +
+             'развёртывания сменился — так бывает, когда в Apps Script создают новое развёртывание ' +
+             'вместо обновления существующего. Проверьте ответ кнопкой ниже: если откроется ошибка ' +
+             'Google Диска, возьмите новый адрес в «Управление развёртываниями» и вставьте его ' +
+             'через шестерёнку. Текущий адрес заканчивается на …' + url.split('?')[0].slice(-22);
+    }
     // Если данные хоть раз приходили, доступ и адрес заведомо в порядке:
     // значит связь оборвалась — обычно вкладка спала или компьютер уходил в сон.
     if (lastLoadAt) {
@@ -263,11 +273,13 @@
           return;
         }
         failed = true;
+        failStreak++;
         showBanner(data && data.error ? data.error : 'Неизвестная ошибка', true, data && data.showCheck);
         setStatus('Не удалось связаться с таблицей');
         return;
       }
       failed = false;
+      failStreak = 0;
       $('banner').hidden = true;
       lastLoadAt = Date.now();
       fillExperts(data.experts || []);
@@ -305,13 +317,16 @@
       list.innerHTML = '<div class="empty">На сегодня напоминаний нет.</div>';
       return;
     }
+    var chosen = $('expert').value || '';
     list.innerHTML = items.map(function (r, i) {
       var extra = r.step === 'overdue' ? ' (' + r.overdueDays + ' дн.)' : '';
+      // в сводном списке важно видеть, чей это договор
+      var owner = (r.expert && r.expert !== chosen) ? ' • ответственный: ' + esc(r.expert) : '';
       return '<div class="card s' + r.step + '">' +
         '<div class="label">' + esc(r.label) + extra + '</div>' +
         '<div class="title">' + esc(r.title) + '</div>' +
         '<div class="meta">Контрольная дата ' + esc(r.date) + ' • ' + esc(r.bookName || '') +
-        ' → ' + esc(r.sheetName) + ', ячейка ' + esc(r.cell || ('A' + r.row)) +
+        ' → ' + esc(r.sheetName) + ', ячейка ' + esc(r.cell || ('A' + r.row)) + owner +
         ' • <a href="' + r.url + '" class="go" data-i="' + i + '">открыть в таблице</a></div>' +
         '</div>';
     }).join('');
@@ -345,7 +360,8 @@
       if ('Notification' in window && Notification.permission === 'granted') {
         try {
           var n = new Notification(r.label, {
-            body: r.title + '\nКонтрольная дата ' + r.date + ' • ' + (r.bookName || ''),
+            body: r.title + '\nКонтрольная дата ' + r.date +
+                  (r.expert && r.expert !== ($('expert').value || '') ? ' • ' + r.expert : ''),
             tag: r.sheetName + r.row,
             requireInteraction: true
           });
