@@ -82,7 +82,7 @@
       Держите вкладку открытой (удобно закрепить её), страница сама проверяет обновления каждые 15 минут.
       Одно уведомление на строку в день. Нажмите «Включить уведомления» один раз — и всплывающие
       уведомления Windows будут приходить, даже когда окно браузера свёрнуто.
-      <br><br>Версия страницы: 7 (29.09.2026). Если здесь другой номер — браузер показывает
+      <br><br>Версия страницы: 8 (29.09.2026). Если здесь другой номер — браузер показывает
       сохранённую копию, обновите страницу сочетанием Ctrl+F5.
     </div>
   </div>
@@ -158,7 +158,7 @@
    * Запрос идёт через подгружаемый скрипт: браузер не даёт странице на своём домене
    * читать обычный ответ Google напрямую, а такой способ работает без настроек сервера.
    */
-  function fetchData(cb) {
+  function fetchData(cb, forceFresh) {
     var url = endpoint();
     if (!url) { showSetup(); return; }
 
@@ -192,6 +192,7 @@
     script.src = url + sep + 'callback=' + name +
       '&expert=' + encodeURIComponent($('expert').value || '') +
       '&overdue=' + ($('overdue').checked ? '1' : '0') +
+      (forceFresh ? '&fresh=1' : '') +
       '&t=' + Date.now();
     script.onerror = function () {
       if (done) return;
@@ -257,9 +258,9 @@
 
   var RETRY_WAITS = [10000, 30000, 60000];
 
-  function load(attempt) {
+  function load(attempt, forceFresh) {
     attempt = attempt || 0;
-    setStatus(attempt ? 'Повторная попытка…' : 'Проверяю…');
+    setStatus(attempt ? 'Повторная попытка…' : (forceFresh ? 'Пересчитываю данные…' : 'Проверяю…'));
     lastRequested = $('expert').value || '';
     localStorage.setItem(KEY_EXPERT, lastRequested);
 
@@ -269,7 +270,7 @@
         if (attempt < RETRY_WAITS.length) {
           var wait = RETRY_WAITS[attempt];
           setStatus('Нет ответа, повторю через ' + Math.round(wait / 1000) + ' с…');
-          setTimeout(function () { load(attempt + 1); }, wait);
+          setTimeout(function () { load(attempt + 1, forceFresh); }, wait);
           return;
         }
         failed = true;
@@ -289,7 +290,7 @@
                 ' • строк: ' + (data.items || []).length +
                 (data.updated ? ' • данные таблицы от ' + data.updated : '') +
                 (data.stale ? ' • показан предыдущий ответ, таблица занята' : ''));
-    });
+    }, forceFresh);
   }
 
   function fillExperts(names) {
@@ -461,7 +462,7 @@
   // Сеть вернулась после сна или отключения — запрос, оборвавшийся тогда, повторяем сейчас.
   window.addEventListener('online', function () { if (failed) load(); });
 
-  $('refresh').addEventListener('click', load);
+  $('refresh').addEventListener('click', function () { load(0, true); });
   $('expert').addEventListener('change', load);
   $('overdue').addEventListener('change', function () {
     localStorage.setItem(KEY_OVERDUE, $('overdue').checked ? '1' : '0');
